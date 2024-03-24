@@ -5,6 +5,11 @@ import "../contracts/interfaces/IDiamondCut.sol";
 import "../contracts/facets/DiamondCutFacet.sol";
 import "../contracts/facets/DiamondLoupeFacet.sol";
 import "../contracts/facets/OwnershipFacet.sol";
+
+import "../contracts/facets/ERC20Facet.sol";
+import "../contracts/facets/AuctionMarketFacet.sol";
+
+import "../contracts/NFTONE.sol";
 import "forge-std/Test.sol";
 import "../contracts/Diamond.sol";
 
@@ -14,18 +19,31 @@ contract DiamondDeployer is Test, IDiamondCut {
     DiamondCutFacet dCutFacet;
     DiamondLoupeFacet dLoupe;
     OwnershipFacet ownerF;
+    ERC20Facet erc20Facet;
+    AuctionMarketFaucet auctionFaucet;
+    NFTONE nft;
 
-    function testDeployDiamond() public {
+    address A = address(0xa);
+    address B = address(0xb);
+    address C = address(0xc);
+    address D = address(0xd);
+
+    AuctionMarketFaucet boundAuctionMarket;
+
+    function setUp() public {
         //deploy facets
         dCutFacet = new DiamondCutFacet();
         diamond = new Diamond(address(this), address(dCutFacet));
         dLoupe = new DiamondLoupeFacet();
         ownerF = new OwnershipFacet();
+        erc20Facet = new ERC20Facet();
+        auctionFaucet = new AuctionMarketFaucet();
+        nft = new NFTONE();
 
         //upgrade diamond with facets
 
         //build cut struct
-        FacetCut[] memory cut = new FacetCut[](2);
+        FacetCut[] memory cut = new FacetCut[](4);
 
         cut[0] = (
             FacetCut({
@@ -43,11 +61,41 @@ contract DiamondDeployer is Test, IDiamondCut {
             })
         );
 
+        cut[2] = (
+            FacetCut({
+                facetAddress: address(erc20Facet),
+                action: FacetCutAction.Add,
+                functionSelectors: generateSelectors("ERC20Facet")
+            })
+        );
+
+        cut[3] = (
+            FacetCut({
+                facetAddress: address(auctionFaucet),
+                action: FacetCutAction.Add,
+                functionSelectors: generateSelectors("AuctionMarketFaucet")
+            })
+        );
+
         //upgrade diamond
         IDiamondCut(address(diamond)).diamondCut(cut, address(0x0), "");
 
         //call a function
         DiamondLoupeFacet(address(diamond)).facetAddresses();
+
+        A = mkaddr("user a");
+        B = mkaddr("user b");
+        C = mkaddr("user c");
+        D = mkaddr("user d");
+
+        // mint AUC tokens
+        ERC20Facet(address(diamond)).mintTo(A);
+        ERC20Facet(address(diamond)).mintTo(B);
+        ERC20Facet(address(diamond)).mintTo(C);
+        ERC20Facet(address(diamond)).mintTo(D);
+
+        // bind the auction market place
+        boundAuctionMarket = AuctionMarketFaucet(address(diamond));
     }
 
     function generateSelectors(
@@ -59,6 +107,37 @@ contract DiamondDeployer is Test, IDiamondCut {
         cmd[2] = _facetName;
         bytes memory res = vm.ffi(cmd);
         selectors = abi.decode(res, (bytes4[]));
+    }
+
+    // function testGetAuctionMarketPlaceName() public {
+    //     switchSigner(A);
+    //     string memory auction = boundAuctionMarketPlace.name();
+
+    //     console.log("auction name", auction);
+    // }
+
+    function testERC20Facet() public {
+        switchSigner(A);
+        uint256 bal = ERC20Facet(address(diamond)).balanceOf(A);
+        console.log("balance of A", bal);
+    }
+
+    function mkaddr(string memory name) public returns (address) {
+        address addr = address(
+            uint160(uint256(keccak256(abi.encodePacked(name))))
+        );
+        vm.label(addr, name);
+        return addr;
+    }
+
+    function switchSigner(address _newSigner) public {
+        address foundrySigner = 0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38;
+        if (msg.sender == foundrySigner) {
+            vm.startPrank(_newSigner);
+        } else {
+            vm.stopPrank();
+            vm.startPrank(_newSigner);
+        }
     }
 
     function diamondCut(
